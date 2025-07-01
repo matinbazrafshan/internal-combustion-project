@@ -13,6 +13,7 @@ T1 = 300    # K
 v1 = R * T1 / P1  # m^3/kg
 r = 12
 
+
 # Dual Cycle
 v2 = v1 / r
 T2 = T1 * r**(gamma - 1)
