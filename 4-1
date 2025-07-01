@@ -1,0 +1,40 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Valve parameters
+l_max = 10  # mm
+ivo, ivc = 340, 590  # Intake valve open/close
+evo, evc = 130, 380  # Exhaust valve open/close
+
+# Lift function
+def smooth_sine_lift(theta, open_angle, close_angle, l_max):
+    duration = close_angle - open_angle
+    if duration <= 0:
+        return 0.0
+    theta_norm = (theta - open_angle) / duration
+    if theta < open_angle or theta > close_angle:
+        return 0.0
+    else:
+        return l_max * 0.5 * (1 - np.cos(2 * np.pi * theta_norm))
+
+# Generate data
+theta = np.linspace(0, 720, 1000)
+lift_intake = [smooth_sine_lift(t, ivo, ivc, l_max) for t in theta]
+lift_exhaust = [smooth_sine_lift(t, evo, evc, l_max) for t in theta]
+
+# Plot
+plt.figure(figsize=(14, 6))
+plt.plot(theta, lift_intake, label='Intake', color='blue', lw=2)
+plt.plot(theta, lift_exhaust, label='Exhaust', color='red', lw=2)
+plt.axvspan(max(ivo, evo), min(ivc, evc), color='yellow', alpha=0.2, label='Overlap')
+for angle in [ivo, ivc, evo, evc]:
+    plt.axvline(angle, color='gray', ls=':', alpha=0.4)
+plt.title('Valve Lift Characteristics')
+plt.xlabel('Crankshaft Angle (degrees)')
+plt.ylabel('Lift (mm)')
+plt.grid(alpha=0.3)
+plt.legend()
+plt.xlim(0, 720)
+plt.ylim(0, 12)
+plt.xticks(np.arange(0, 721, 90))
+plt.show()
