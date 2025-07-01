@@ -1,0 +1,140 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Constants
+gamma = 1.4
+Cv = 0.718  # kJ/kg·K
+Cp = 1.005  # kJ/kg·K
+R = 0.287   # kJ/kg·K
+
+# Initial conditions
+P1 = 100    # kPa
+T1 = 300    # K
+v1 = R * T1 / P1  # m³/kg
+
+# ===================== OPTIMAL COMPRESSION RATIOS =====================
+r_dual = 12  # Given in problem statement
+r_otto = 18  # Determined via T_max constraint
+r_diesel = 18  # Determined via T_max constraint
+
+# ===================== DUAL CYCLE CALCULATIONS =====================
+# States
+v2_dual = v1 / r_dual
+T2_dual = T1 * (r_dual ** (gamma - 1))
+P2_dual = P1 * (r_dual ** gamma)
+P3_dual = 2 * P2_dual  # Pressure ratio P3/P2 = 2 (given)
+v3_dual = v2_dual
+T3_dual = T2_dual * (P3_dual / P2_dual)
+stroke_dual = v1 - v2_dual
+v4_dual = v3_dual + 0.05 * stroke_dual  # 5% of stroke
+P4_dual = P3_dual
+T4_dual = T3_dual * (v4_dual / v3_dual)
+v5_dual = v1
+P5_dual = P4_dual * (v4_dual / v5_dual) ** gamma
+T5_dual = T4_dual * (v4_dual / v5_dual) ** (gamma - 1)
+
+# Heat and Efficiency
+Q_in_dual = Cv * (T3_dual - T2_dual) + Cp * (T4_dual - T3_dual)
+Q_out_dual = Cv * (T5_dual - T1)
+eta_dual = 1 - Q_out_dual / Q_in_dual
+
+# ===================== OTTO CYCLE CALCULATIONS =====================
+# States
+v2_otto = v1 / r_otto
+T2_otto = T1 * (r_otto ** (gamma - 1))
+P2_otto = P1 * (r_otto ** gamma)
+T3_otto = 2500  # Max temperature constraint
+Q_in_otto = Cv * (T3_otto - T2_otto)
+P3_otto = P2_otto * (T3_otto / T2_otto)
+v3_otto = v2_otto
+v4_otto = v1
+P4_otto = P3_otto * (v3_otto / v4_otto) ** gamma
+T4_otto = T3_otto * (v3_otto / v4_otto) ** (gamma - 1)
+
+# Efficiency
+Q_out_otto = Cv * (T4_otto - T1)
+eta_otto = 1 - Q_out_otto / Q_in_otto
+
+# ===================== DIESEL CYCLE CALCULATIONS =====================
+# States
+v2_diesel = v1 / r_diesel
+T2_diesel = T1 * (r_diesel ** (gamma - 1))
+P2_diesel = P1 * (r_diesel ** gamma)
+T3_diesel = 2500  # Max temperature constraint
+v3_diesel = v2_diesel * (T3_diesel / T2_diesel)
+P3_diesel = P2_diesel
+Q_in_diesel = Cp * (T3_diesel - T2_diesel)
+v4_diesel = v1
+P4_diesel = P3_diesel * (v3_diesel / v4_diesel) ** gamma
+T4_diesel = T3_diesel * (v3_diesel / v4_diesel) ** (gamma - 1)
+
+# Efficiency
+Q_out_diesel = Cv * (T4_diesel - T1)
+eta_diesel = 1 - Q_out_diesel / Q_in_diesel
+
+# ===================== PLOTTING =====================
+def isentropic_curve(v_start, v_end, P_start, num_points=100):
+    v = np.linspace(v_start, v_end, num_points)
+    P = P_start * (v_start / v) ** gamma
+    return v, P
+
+def constant_volume_line(v, P_start, P_end, num_points=100):
+    P = np.linspace(P_start, P_end, num_points)
+    v = np.full(num_points, v)
+    return v, P
+
+def constant_pressure_line(P, v_start, v_end, num_points=100):
+    v = np.linspace(v_start, v_end, num_points)
+    P = np.full(num_points, P)
+    return v, P
+
+# Dual Cycle Curves
+v1_2d, P1_2d = isentropic_curve(v1, v2_dual, P1)
+v2_3d, P2_3d = constant_volume_line(v2_dual, P2_dual, P3_dual)
+v3_4d, P3_4d = constant_pressure_line(P3_dual, v3_dual, v4_dual)
+v4_5d, P4_5d = isentropic_curve(v4_dual, v5_dual, P4_dual)
+v5_1d, P5_1d = constant_volume_line(v5_dual, P5_dual, P1)
+
+# Otto Cycle Curves
+v1_2o, P1_2o = isentropic_curve(v1, v2_otto, P1)
+v2_3o, P2_3o = constant_volume_line(v2_otto, P2_otto, P3_otto)
+v3_4o, P3_4o = isentropic_curve(v3_otto, v4_otto, P3_otto)
+v4_1o, P4_1o = constant_volume_line(v4_otto, P4_otto, P1)
+
+# Diesel Cycle Curves
+v1_2di, P1_2di = isentropic_curve(v1, v2_diesel, P1)
+v2_3di, P2_3di = constant_pressure_line(P2_diesel, v2_diesel, v3_diesel)
+v3_4di, P3_4di = isentropic_curve(v3_diesel, v4_diesel, P3_diesel)
+v4_1di, P4_1di = constant_volume_line(v4_diesel, P4_diesel, P1)
+
+plt.figure(figsize=(12, 8))
+# Dual Cycle
+plt.plot(v1_2d, P1_2d, 'b-', label='Dual: 1-2 Isentropic Compression')
+plt.plot(v2_3d, P2_3d, 'b-', label='Dual: 2-3 Const. Volume Heat Add.')
+plt.plot(v3_4d, P3_4d, 'b-', label='Dual: 3-4 Const. Pressure Heat Add.')
+plt.plot(v4_5d, P4_5d, 'b-', label='Dual: 4-5 Isentropic Expansion')
+plt.plot(v5_1d, P5_1d, 'b-', label='Dual: 5-1 Const. Volume Heat Rej.')
+# Otto Cycle
+plt.plot(v1_2o, P1_2o, 'r--', label='Otto: 1-2 Isentropic Compression')
+plt.plot(v2_3o, P2_3o, 'r--', label='Otto: 2-3 Const. Volume Heat Add.')
+plt.plot(v3_4o, P3_4o, 'r--', label='Otto: 3-4 Isentropic Expansion')
+plt.plot(v4_1o, P4_1o, 'r--', label='Otto: 4-1 Const. Volume Heat Rej.')
+# Diesel Cycle
+plt.plot(v1_2di, P1_2di, 'g-.', label='Diesel: 1-2 Isentropic Compression')
+plt.plot(v2_3di, P2_3di, 'g-.', label='Diesel: 2-3 Const. Pressure Heat Add.')
+plt.plot(v3_4di, P3_4di, 'g-.', label='Diesel: 3-4 Isentropic Expansion')
+plt.plot(v4_1di, P4_1di, 'g-.', label='Diesel: 4-1 Const. Volume Heat Rej.')
+
+plt.xlabel('Specific Volume (m³/kg)')
+plt.ylabel('Pressure (kPa)')
+plt.title('PV Diagram: Optimal CR (Dual=12, Otto/Diesel=18)')
+plt.grid(True)
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+
+# Print Efficiencies
+print(f"Dual Cycle Efficiency: {eta_dual:.2%}")
+print(f"Otto Cycle Efficiency: {eta_otto:.2%}")
+print(f"Diesel Cycle Efficiency: {eta_diesel:.2%}")
+
+plt.show()
