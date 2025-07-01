@@ -1,0 +1,242 @@
+# قبل از اجرای این کد، لازم است این کتابخانه‌ها را نصب کنید:
+# pip install cantera numpy scipy matplotlib pandas
+
+import numpy as np
+from scipy.integrate import solve_ivp
+import cantera as ct
+import matplotlib.pyplot as plt
+import pandas as pd
+from scipy.optimize import root_scalar
+
+# Initialize Cantera with GRI-Mech 3.0 mechanism
+gas = ct.Solution('gri30.yaml')
+gas.TPX = 300, 100e3, 'N2:0.79, O2:0.21'  # Initial conditions: 300 K, 100 kPa, air composition
+
+# Engine Parameters
+rp = 2           # Pressure ratio
+rc = 1.15        # Cut-off ratio
+T1 = 300         # Initial temperature (K)
+P1 = 100e3       # Initial pressure (Pa)
+Q_total = 2500e3 # Total heat input (J/kg)
+engine_rpm = 3000
+crank_angle_combustion = 70
+a_wiebe = 5      # Wiebe function parameter
+n_wiebe = 2      # Wiebe function exponent
+T_max = 2500     # Maximum allowable temperature (K)
+
+# Calculate cycle and combustion times
+cycle_time = (60 / engine_rpm) * 2  # Time for one cycle (s)
+combustion_time = (crank_angle_combustion / 720) * cycle_time  # Combustion duration (s)
+
+# Zeldovich Mechanism Parameters
+Ea1 = 314e3    # Activation energy for N2 + O -> NO + N (J/mol)
+Ea2 = 76e3     # Activation energy for N + O2 -> NO + O (J/mol)
+A1 = 6.4e9 * 1e-6  # Pre-exponential factor for reaction 1 (m^3/mol·s)
+A2 = 1.4e10 * 1e-6 # Pre-exponential factor for reaction 2 (m^3/mol·s)
+
+# Wiebe function for mass fraction burned
+def wiebe(theta):
+    return 1 - np.exp(-a_wiebe * (theta / crank_angle_combustion) ** n_wiebe)
+
+# Specific Heat Capacity Calculation for Diesel-Air Mixture
+R = 8.314  # J/(mol·K)
+T1_cp, T2_cp = 300, 2500
+
+def cp_n2(T):
+    return R * (3.1156 + 1.3575e-3 * T - 4.271e-7 * T**2 + 1.887e-10 * T**3)
+
+def cp_o2(T):
+    return R * (3.6256 + 1.878e-3 * T - 7.055e-7 * T**2 + 1.470e-10 * T**3)
+
+def cp_c12h26(T):
+    a = 245.46
+    b = 0.1818
+    return a + b * T
+
+def calculate_cp_avg(cp_func, T1, T2):
+    T = np.linspace(T1, T2, 1000)
+    cp_values = cp_func(T)
+    integral = np.trapz(cp_values, T)
+    return integral / (T2 - T1)
+
+cp_avg_n2 = calculate_cp_avg(cp_n2, T1_cp, T2_cp)
+cp_avg_o2 = calculate_cp_avg(cp_o2, T1_cp, T2_cp)
+cp_avg_c12h26 = calculate_cp_avg(cp_c12h26, T1_cp, T2_cp)
+
+X_c12h26 = 0.0112
+X_o2_diesel = 0.207
+X_n2_diesel = 0.782
+
+M_n2 = 28.0
+M_o2 = 32.0
+M_c12h26 = 170.0
+
+M_mix_diesel = X_c12h26 * M_c12h26 + X_o2_diesel * M_o2 + X_n2_diesel * M_n2
+cp_mix_diesel_molar = X_c12h26 * cp_avg_c12h26 + X_o2_diesel * cp_avg_o2 + X_n2_diesel * cp_avg_n2
+cv_mix_diesel_molar = cp_mix_diesel_molar - R
+cp_mix_diesel_mass = cp_mix_diesel_molar / (M_mix_diesel / 1000)  # g/mol to kg/mol
+cv_mix_diesel_mass = cv_mix_diesel_molar / (M_mix_diesel / 1000)
+
+print("Diesel-Air Mixture:")
+print(f"Cp = {cp_mix_diesel_mass:.2f} J/(kg·K)")
+print(f"Cv = {cv_mix_diesel_mass:.2f} J/(kg·K)")
+
+# Function to compute maximum temperature for a given compression ratio r
+def compute_max_temp(r):
+    gas.TPX = T1, P1, 'N2:0.79, O2:0.21'
+    gamma_comp = gas.cp / gas.cv
+    T2_curr = T1 * (r ** (gamma_comp - 1))  # Temperature after compression
+    P2_curr = P1 * (r ** gamma_comp)        # Pressure after compression
+    def thermodynamic_states(t):
+        theta = (t / combustion_time) * crank_angle_combustion
+        mass_burned = wiebe(theta)
+        Q_released = Q_total * mass_burned
+        if t < combustion_time / 3:
+            T = T2_curr + (Q_released / cv_mix_diesel_mass)  # Using calculated Cv
+            P = P2_curr * (T / T2_curr)
+        else:
+            T = T2_curr + (Q_released / cp_mix_diesel_mass)  # Using calculated Cp
+            P = P2_curr * (1 + (t - combustion_time / 3) / (combustion_time / 3))
+        gas.TP = T, P
+        return T, P, gas
+    times = np.linspace(0, combustion_time, 1000)
+    temps = [thermodynamic_states(t)[0] for t in times]
+    max_T = max(temps)
+    return max_T - T_max
+
+# Verify signs of f(a) and f(b) at bracket endpoints
+print(f"f(1) = {compute_max_temp(1):.2f}, f(20) = {compute_max_temp(20):.2f}")
+
+# Solve for optimal compression ratio r to satisfy T_max constraint
+sol = root_scalar(compute_max_temp, bracket=[1, 150], method='brentq', xtol=0.1)
+r = sol.root
+print(f"Optimal compression ratio: {r:.2f}")
+
+# Reset gas to initial state
+gas.TPX = T1, P1, 'N2:0.79, O2:0.21'
+
+# Recalculate T2 and P2 with optimal r
+gamma = gas.cp / gas.cv
+T2 = T1 * (r ** (gamma - 1))
+P2 = P1 * (r ** gamma)
+
+# Thermodynamic states function using optimal r
+def thermodynamic_states(t):
+    theta = (t / combustion_time) * crank_angle_combustion
+    mass_burned = wiebe(theta)
+    Q_released = Q_total * mass_burned
+    if t < combustion_time / 3:
+        T = T2 + (Q_released / cv_mix_diesel_mass)
+        P = P2 * (T / T2)
+    else:
+        T = T2 + (Q_released / cp_mix_diesel_mass)
+        P = P2 * (1 + (t - combustion_time / 3) / (combustion_time / 3))
+    gas.TP = T, P
+    return T, P, gas
+
+# ODE system for NOx formation (Zeldovich mechanism)
+def derivatives(t, y):
+    NO, N, O, O2, N2 = y
+    T, P, gas = thermodynamic_states(t)
+    R = ct.gas_constant / gas.mean_molecular_weight
+    gas.X = {'O2': O2, 'N2': N2, 'O': O, 'N': N, 'NO': NO}
+    gas.equilibrate('TP')
+    O_eq = gas['O'].X[0]
+    N_eq = gas['N'].X[0]
+    O2_conc = gas['O2'].X[0]
+    N2_conc = gas['N2'].X[0]
+    k1 = A1 * np.exp(-Ea1 / (R * T))
+    k2 = A2 * np.exp(-Ea2 / (R * T))
+    dNO_dt = k1 * N2_conc * O_eq + k2 * N_eq * O2_conc
+    dN_dt = k1 * N2_conc * O_eq - k2 * N_eq * O2_conc
+    dO_dt = -k1 * N2_conc * O_eq + k2 * N_eq * O2_conc
+    dO2_dt = -k2 * N_eq * O2_conc
+    dN2_dt = -k1 * N2_conc * O_eq
+    return [dNO_dt, dN_dt, dO_dt, dO2_dt, dN2_dt]
+
+# Initial conditions for ODE
+n_total = P1 / (ct.gas_constant * T1)
+y0 = [
+    0.0,                            # Initial NO moles
+    1e-6,                           # Initial N moles
+    1e-6,                           # Initial O moles
+    gas.X[gas.species_index('O2')] * n_total,  # Initial O2 moles
+    gas.X[gas.species_index('N2')] * n_total   # Initial N2 moles
+]
+
+# Solve ODE for NOx formation
+sol = solve_ivp(
+    derivatives,
+    (0, combustion_time),
+    y0,
+    method='LSODA',
+    t_eval=np.linspace(0, combustion_time, 1000),
+    rtol=1e-6,
+    atol=1e-9
+)
+
+# Process and store results
+data = {
+    'time': sol.t,
+    'theta': [],
+    'mass_burned': [],
+    'Q_released': [],
+    'Temperature': [],
+    'Pressure': [],
+    'NO_ppm': [],
+    'NO_moles': sol.y[0],
+    'N_moles': sol.y[1],
+    'O_moles': sol.y[2],
+    'O2_moles': sol.y[3],
+    'N2_moles': sol.y[4]
+}
+
+for i, t in enumerate(sol.t):
+    theta = (t / combustion_time) * crank_angle_combustion
+    mb = wiebe(theta)
+    Q = Q_total * mb
+    T, P, _ = thermodynamic_states(t)
+    n_total_current = P / (ct.gas_constant * T)
+    data['theta'].append(theta)
+    data['mass_burned'].append(mb)
+    data['Q_released'].append(Q)
+    data['Temperature'].append(T)
+    data['Pressure'].append(P)
+    data['NO_ppm'].append((sol.y[0, i] / n_total_current) * 1e6)
+
+# Convert to DataFrame and save to CSV
+df = pd.DataFrame(data)
+df.to_csv('simulation_results.csv', index=False)
+
+# Display maximum values
+max_values = df.max(numeric_only=True)
+print("\nMaximum values for each parameter:")
+print(max_values)
+
+# Plot NOx formation
+NO_ppm = np.array(data['NO_ppm'])
+plt.figure(figsize=(12, 6))
+plt.plot(sol.t * 1e3, NO_ppm, 'r-', linewidth=2)
+plt.xlabel('Time (ms)', fontsize=12)
+plt.ylabel('NOx (ppm)', fontsize=12)
+plt.title('NOx Formation in Dual Cycle', fontsize=14)
+plt.grid(True)
+plt.ylim(0, 2500)
+plt.show()
+
+print(f"Peak NOx: {np.max(NO_ppm):.2f} ppm")
+print(f"Optimal compression ratio: {r:.2f}")
+print("\n" + "="*50)
+print("نتایج محاسبات ظرفیت حرارتی ویژه:")
+print("="*50)
+print(f"دمای متوسط محاسبه: {T1_cp} K تا {T2_cp} K")
+print("\nمقادیر متوسط برای اجزای ترکیب:")
+print(f"- نیتروژن (N₂): {cp_avg_n2:.2f} J/(mol·K)")
+print(f"- اکسیژن (O₂): {cp_avg_o2:.2f} J/(mol·K)") 
+print(f"- دیزل (C₁₂H₂₆): {cp_avg_c12h26:.2f} J/(mol·K)")
+print("\nمقادیر نهایی برای مخلوط:")
+print(f"جرم مولی مخلوط: {M_mix_diesel:.2f} g/mol")
+print(f"ظرفیت حرارتی در فشار ثابت (Cp): {cp_mix_diesel_mass:.2f} J/(kg·K)")
+print(f"ظرفیت حرارتی در حجم ثابت (Cv): {cv_mix_diesel_mass:.2f} J/(kg·K)")
+print(f"نسبت گاما (γ = Cp/Cv): {cp_mix_diesel_mass/cv_mix_diesel_mass:.2f}")
+print("="*50 + "\n")
