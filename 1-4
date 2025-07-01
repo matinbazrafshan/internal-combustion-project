@@ -1,0 +1,165 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from tabulate import tabulate
+
+# Thermodynamic constants
+gamma = 1.4
+Cv = 0.718  # kJ/kg·K
+Cp = 1.005  # kJ/kg·K
+R = 0.287   # kJ/kg·K
+
+def calculate_cycle_properties(T1, P1, r, r_p, r_c):
+    """Calculate all state properties for the dual cycle"""
+    # State 1
+    v1 = R * T1 / P1
+    
+    # State 2 (Isentropic compression)
+    v2 = v1 / r
+    T2 = T1 * r**(gamma-1)
+    P2 = P1 * r**gamma
+    
+    # State 3 (Constant volume heat addition)
+    P3 = r_p * P2
+    T3 = T2 * r_p
+    v3 = v2
+    
+    # State 4 (Constant pressure heat addition)
+    v4 = r_c * v3
+    T4 = T3 * r_c
+    P4 = P3
+    
+    # State 5 (Isentropic expansion)
+    v5 = v1
+    T5 = T4 * (v4/v5)**(gamma-1)
+    P5 = P4 * (v4/v5)**gamma
+    
+    return {
+        'T': [T1, T2, T3, T4, T5],
+        'P': [P1, P2, P3, P4, P5],
+        'v': [v1, v2, v3, v4, v5]
+    }
+
+def optimize_cycle(T1, P1, T_max):
+    """Optimize cycle parameters to maximize net work"""
+    max_work = -np.inf
+    best_params = {}
+    
+    # Parameter search ranges
+    r_range = np.linspace(5, 20, 50)      # Compression ratio
+    r_p_range = np.linspace(1.1, 3, 50)   # Pressure ratio
+    r_c_range = np.linspace(1.1, 2, 50)   # Cut-off ratio
+    
+    for r in r_range:
+        for r_p in r_p_range:
+            # Calculate state 3 temperature
+            T3 = T1 * r**(gamma-1) * r_p
+            if T3 > T_max:
+                continue  # Skip if exceeds temp limit
+                
+            for r_c in r_c_range:
+                # Calculate state 4 temperature
+                T4 = T3 * r_c
+                if T4 > T_max:
+                    continue  # Skip if exceeds temp limit
+                
+                # Calculate cycle properties
+                props = calculate_cycle_properties(T1, P1, r, r_p, r_c)
+                
+                # Calculate heat and work
+                Q23 = Cv * (props['T'][2] - props['T'][1])
+                Q34 = Cp * (props['T'][3] - props['T'][2])
+                Q_in = Q23 + Q34
+                Q_out = Cv * (props['T'][4] - props['T'][0])
+                W_net = Q_in - Q_out
+                
+                # Update best parameters
+                if W_net > max_work:
+                    max_work = W_net
+                    best_params = {
+                        'r': r,
+                        'r_p': r_p,
+                        'r_c': r_c,
+                        'W_net': W_net,
+                        'Q_in': Q_in,
+                        'Q_out': Q_out,
+                        'eta': 1 - Q_out/Q_in,
+                        'props': props
+                    }
+    
+    return best_params
+
+def plot_pv_diagram(props):
+    """Generate PV diagram for the cycle"""
+    plt.figure(figsize=(10, 6))
+    
+    # Process curves
+    v = props['v']
+    P = props['P']
+    
+    # 1-2: Isentropic compression
+    vs = np.linspace(v[0], v[1], 100)
+    plt.plot(vs, P[0]*(v[0]/vs)**gamma, 'b')
+    
+    # 2-3: Constant volume
+    plt.plot([v[1], v[2]], [P[1], P[2]], 'r')
+    
+    # 3-4: Constant pressure
+    vs = np.linspace(v[2], v[3], 100)
+    plt.plot(vs, [P[2]]*len(vs), 'g')
+    
+    # 4-5: Isentropic expansion
+    vs = np.linspace(v[3], v[4], 100)
+    plt.plot(vs, P[3]*(v[3]/vs)**gamma, 'm')
+    
+    # 5-1: Constant volume
+    plt.plot([v[4], v[0]], [P[4], P[0]], 'c')
+    
+    # Formatting
+    plt.xlabel('Specific Volume (m³/kg)')
+    plt.ylabel('Pressure (kPa)')
+    plt.title('Optimized Dual Cycle PV Diagram')
+    plt.grid(True)
+    plt.tight_layout()
+
+def main():
+    # User input
+    T1 = float(input("Enter initial temperature (K): "))
+    P1 = float(input("Enter initial pressure (kPa): "))
+    T_max = float(input("Enter maximum cycle temperature (K): "))
+    
+    # Optimize cycle
+    results = optimize_cycle(T1, P1, T_max)
+    
+    # Print results
+    print("\nOptimized Parameters:")
+    print(f"Compression Ratio (r): {results['r']:.2f}")
+    print(f"Pressure Ratio (r_p): {results['r_p']:.2f}")
+    print(f"Cut-off Ratio (r_c): {results['r_c']:.2f}")
+    print(f"\nPerformance Metrics:")
+    print(f"Maximum Net Work: {results['W_net']:.2f} kJ/kg")
+    print(f"Heat Input (Q_in): {results['Q_in']:.2f} kJ/kg")
+    print(f"Heat Rejected (Q_out): {results['Q_out']:.2f} kJ/kg")
+    print(f"Thermal Efficiency: {results['eta']:.2%}")
+    
+    # Create state table
+    table_data = []
+    for i in range(5):
+        table_data.append([
+            f"State {i+1}",
+            f"{results['props']['T'][i]:.2f} K",
+            f"{results['props']['P'][i]:.2f} kPa",
+            f"{results['props']['v'][i]:.4f} m³/kg"
+        ])
+    
+    print("\nState Point Properties:")
+    print(tabulate(table_data, 
+                 headers=["State", "Temperature", "Pressure", "Specific Volume"],
+                 tablefmt="grid"))
+    
+    # Plot PV diagram
+    plot_pv_diagram(results['props'])
+    plt.show()
+
+if __name__ == "__main__":
+    main()
+
