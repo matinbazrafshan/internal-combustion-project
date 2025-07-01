@@ -1,0 +1,168 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+from tabulate import tabulate
+
+# Constants
+gamma = 1.4
+Cv = 0.718  # kJ/kg·K
+Cp = 1.005  # kJ/kg·K
+R = 0.287   # kJ/kg·K
+
+def main():
+    # User inputs
+    T1 = float(input("Enter initial temperature (K): "))
+    P1 = float(input("Enter initial pressure (kPa): "))
+    T_max = float(input("Enter maximum cycle temperature (K): "))
+    
+    K = T_max / T1
+    r_min = 1.1
+    r_max = (K) ** (1/(gamma-1))
+    
+    # Optimization parameters
+    r_step = 0.5
+    rc_step = 0.1
+    max_efficiency = 0
+    optimal_params = {}
+    
+    # Brute-force optimization
+    for r in np.arange(r_min, min(r_max, 25) + r_step, r_step):
+        A = K / (r ** (gamma-1))
+        if A < 1:
+            continue
+        
+        for rc in np.arange(1.01, A + rc_step, rc_step):
+            rp = A / rc
+            if rp < 1:
+                continue
+            
+            # Calculate efficiency
+            numerator = (rp * rc**gamma - 1)
+            denominator = (r**(gamma-1) * ((rp - 1) + gamma * rp * (rc - 1)))
+            if denominator == 0:
+                continue
+            efficiency = 1 - (Cv * numerator) / (Cv * denominator)
+            
+            if efficiency > max_efficiency:
+                max_efficiency = efficiency
+                optimal_params = {
+                    'r': r,
+                    'rc': rc,
+                    'rp': rp,
+                    'eta': efficiency
+                }
+    
+    # Calculate cycle properties for optimal parameters
+    r = optimal_params['r']
+    rc = optimal_params['rc']
+    rp = optimal_params['rp']
+    
+    # State calculations
+    v1 = R * T1 / P1
+    # State 1
+    T = [T1]
+    P = [P1]
+    v = [v1]
+    
+    # State 2
+    T2 = T1 * r**(gamma-1)
+    P2 = P1 * r**gamma
+    v2 = v1 / r
+    T.append(T2)
+    P.append(P2)
+    v.append(v2)
+    
+    # State 3
+    P3 = rp * P2
+    T3 = T2 * rp
+    v3 = v2
+    T.append(T3)
+    P.append(P3)
+    v.append(v3)
+    
+    # State 4
+    T4 = T3 * rc
+    v4 = v3 * rc
+    P4 = P3
+    T.append(T4)
+    P.append(P4)
+    v.append(v4)
+    
+    # State 5
+    v5 = v1
+    T5 = T4 * (v4 / v5)**(gamma-1)
+    P5 = P4 * (v4 / v5)**gamma
+    T.append(T5)
+    P.append(P5)
+    v.append(v5)
+    
+    # Thermodynamic calculations
+    Q23 = Cv * (T3 - T2)
+    Q34 = Cp * (T4 - T3)
+    Q_in = Q23 + Q34
+    Q_out = Cv * (T5 - T1)
+    W_net = Q_in - Q_out
+    
+    # Generate PV diagram
+    def isentropic(v1, v2, P1):
+        v = np.linspace(v1, v2, 100)
+        return v, P1 * (v1/v)**gamma
+    
+    def constant_volume(v, P1, P2):
+        P = np.linspace(P1, P2, 100)
+        return [v]*100, P
+    
+    def constant_pressure(P, v1, v2):
+        v = np.linspace(v1, v2, 100)
+        return v, [P]*100
+    
+    # Dual cycle curves
+    v12, P12 = isentropic(v[0], v[1], P[0])
+    v23, P23 = constant_volume(v[1], P[1], P[2])
+    v34, P34 = constant_pressure(P[2], v[2], v[3])
+    v45, P45 = isentropic(v[3], v[4], P[3])
+    v51, P51 = constant_volume(v[4], P[4], P[0])
+    
+    plt.figure(figsize=(12, 8))
+    plt.plot(v12, P12, 'b-', label='1-2: Isentropic Compression')
+    plt.plot(v23, P23, 'r-', label='2-3: Constant Volume Heat Addition')
+    plt.plot(v34, P34, 'g-', label='3-4: Constant Pressure Heat Addition')
+    plt.plot(v45, P45, 'm-', label='4-5: Isentropic Expansion')
+    plt.plot(v51, P51, 'c-', label='5-1: Constant Volume Heat Rejection')
+    plt.scatter(v, P, color='k', zorder=5)
+    plt.xlabel('Specific Volume (m³/kg)')
+    plt.ylabel('Pressure (kPa)')
+    plt.title('Optimized Dual Cycle PV Diagram')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    
+    # Create results table
+    state_data = []
+    for i in range(5):
+        state_data.append([
+            f"State {i+1}",
+            f"{T[i]:.2f} K",
+            f"{P[i]:.2f} kPa",
+            f"{v[i]:.4f} m³/kg"
+        ])
+    
+    print("\nOptimized Cycle Parameters:")
+    print(f"Compression Ratio (r): {optimal_params['r']:.2f}")
+    print(f"Pressure Ratio (rp): {optimal_params['rp']:.2f}")
+    print(f"Cut-off Ratio (rc): {optimal_params['rc']:.2f}")
+    print(f"\nMaximum Thermal Efficiency: {optimal_params['eta']:.2%}")
+    print(f"Heat Input (Q_in): {Q_in:.2f} kJ/kg")
+    print(f"Heat Rejected (Q_out): {Q_out:.2f} kJ/kg")
+    print(f"Net Work (W_net): {W_net:.2f} kJ/kg")
+    
+    print("\nState Point Properties:")
+    print(tabulate(state_data, 
+                   headers=["State", "Temperature", "Pressure", "Specific Volume"],
+                   tablefmt="grid"))
+    
+    plt.show()
+
+if __name__ == "__main__":
+    main()
