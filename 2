@@ -1,0 +1,86 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define the ratio of specific heats for air
+gamma = 1.4
+
+# Fixed compression and expansion ratios
+r_c = 12
+r_e = 17
+
+# Input values from the user
+P1 = float(input("Enter inlet air pressure P1 (e.g., in kPa): "))
+T1 = float(input("Enter inlet air temperature T1 (e.g., in K): "))
+T_max = float(input("Enter maximum cycle temperature T_max (e.g., in K): "))
+
+# Set initial specific volume (arbitrary scaling, can represent specific volume)
+v1 = 1.0
+v2 = v1 / r_c  # Volume after compression
+v4 = v2 * r_e  # Volume after expansion
+v3 = v2  # Isochoric process, v3 = v2
+
+# Calculate pressures and temperatures at each state
+# State 1: Inlet conditions
+P2 = P1 * r_c**gamma  # Isentropic compression to state 2
+T2 = T1 * r_c**(gamma - 1)
+
+# State 3: After isochoric heat addition, P3 set such that P4 = P1 after expansion
+P3 = P1 * r_e**gamma
+T3 = T2 * (P3 / P2)  # T3 / T2 = P3 / P2 for isochoric process
+
+# Check if T3 exceeds T_max
+if T3 > T_max:
+    print(f"Warning: Maximum temperature T3 = {T3:.2f} exceeds T_max = {T_max:.2f}")
+else:
+    print(f"T3 = {T3:.2f} is within T_max = {T_max:.2f}")
+
+# State 4: After isentropic expansion
+P4 = P1  # Isobaric process 4-1 requires P4 = P1
+T4 = T3 / r_e**(gamma - 1)  # T4 / T3 = (v3 / v4)^(gamma-1)
+
+# Calculate specific heats using ideal gas law at state 1: P1 * v1 = R * T1
+R = P1 / T1  # Gas constant (units depend on P1 and T1, e.g., kJ/kg·K if P1 in kPa, T1 in K)
+c_v = R / (gamma - 1)  # Specific heat at constant volume
+c_p = gamma * c_v     # Specific heat at constant pressure
+
+# Calculate heat and work (assuming mass = 1 kg for specific quantities)
+Q_23 = c_v * (T3 - T2)  # Heat input (isochoric heat addition)
+Q_41 = c_p * (T1 - T4)  # Heat rejection (isobaric, negative since T1 < T4)
+W_net = Q_23 + Q_41     # Net work output (Q_in - Q_out, since Q_41 is negative)
+eta = W_net / Q_23      # Thermal efficiency
+
+# Output results
+print(f"\nCycle Calculations:")
+print(f"Work output W_net = {W_net:.2f} (units depend on P1, e.g., kJ/kg)")
+print(f"Thermal efficiency eta = {eta:.4f}")
+print(f"Heat input Q_in = {Q_23:.2f} (units depend on P1, e.g., kJ/kg)")
+
+# Generate points for P-V diagram
+# 1-2: Isentropic compression
+v_12 = np.linspace(v1, v2, 100)
+P_12 = P1 * (v1 / v_12)**gamma
+
+# 2-3: Isochoric heat addition
+v_23 = np.array([v2, v2])
+P_23 = np.array([P2, P3])
+
+# 3-4: Isentropic expansion
+v_34 = np.linspace(v2, v4, 100)
+P_34 = P3 * (v2 / v_34)**gamma
+
+# 4-1: Isobaric heat rejection
+v_41 = np.linspace(v4, v1, 100)
+P_41 = np.ones_like(v_41) * P1
+
+# Plotting
+plt.figure(figsize=(8, 6))
+plt.plot(v_12, P_12, 'b-', label='Isentropic Compression (1-2)')
+plt.plot(v_23, P_23, 'r-', label='Isochoric Heat Addition (2-3)')
+plt.plot(v_34, P_34, 'g-', label='Isentropic Expansion (3-4)')
+plt.plot(v_41, P_41, 'm-', label='Isobaric Heat Rejection (4-1)')
+plt.xlabel('Specific Volume (v)')
+plt.ylabel('Pressure (P)')
+plt.title('P-V Diagram of Atkinson Cycle (r_c = 12, r_e = 17)')
+plt.legend()
+plt.grid(True)
+plt.show()
