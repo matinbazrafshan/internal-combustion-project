@@ -1,0 +1,62 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Constants
+gamma = 1.4
+R = 287  # J/kg·K
+P_b = 105e3  # Pa
+T_0 = 300  # K
+P_0_crit = P_b / 0.5283  # Critical upstream pressure
+
+# Range of P_0
+P_0 = np.linspace(50e3, 300e3, 100)
+
+# Initialize arrays
+V_t = np.zeros_like(P_0)
+mass_flux = np.zeros_like(P_0)
+
+# Critical values
+T_star = T_0 * (2 / (gamma + 1))
+a_star = np.sqrt(gamma * R * T_star)
+
+# Compute V_t and mass_flux
+for i, p in enumerate(P_0):
+    if p < P_0_crit:  # Subsonic
+        M_t = np.sqrt(2 / (gamma - 1) * ((p / P_b)**((gamma - 1) / gamma) - 1))
+        T_t = T_0 * (P_b / p)**((gamma - 1) / gamma)
+        rho_t = P_b / (R * T_t)
+        a_t = np.sqrt(gamma * R * T_t)
+        V_t[i] = M_t * a_t
+        mass_flux[i] = rho_t * V_t[i]
+    else:  # Sonic
+        P_star = p * 0.5283
+        rho_star = P_star / (R * T_star)
+        V_t[i] = a_star
+        mass_flux[i] = rho_star * a_star
+
+# Plot V_t vs P_0
+plt.figure(figsize=(10, 6))
+plt.plot(P_0 / 1e3, V_t, label='Throat Velocity $V_t$ (m/s)', color='green')
+plt.axvline(x=P_0_crit / 1e3, color='red', linestyle='--', label=f'Critical $P_0$ = {P_0_crit/1e3:.2f} kPa')
+plt.xlabel('Upstream Pressure $P_0$ (kPa)')
+plt.ylabel('Throat Velocity $V_t$ (m/s)')
+plt.title('Throat Velocity vs. Upstream Pressure')
+plt.legend()
+plt.grid(True)
+plt.text(50, 300, 'Subsonic', fontsize=12)
+plt.text(220, 300, 'Sonic', fontsize=12)
+plt.show()
+
+# Plot mass flux vs P_0
+plt.figure(figsize=(10, 6))
+plt.plot(P_0 / 1e3, mass_flux, label='Mass Flux $\dot{m}/A$ (kg/s·m²)', color='purple')
+plt.axvline(x=P_0_crit / 1e3, color='red', linestyle='--', label=f'Critical $P_0$ = {P_0_crit/1e3:.2f} kPa')
+plt.xlabel('Upstream Pressure $P_0$ (kPa)')
+plt.ylabel('Mass Flux $\dot{m}/A$ (kg/s·m²)')
+plt.title('Mass Flux vs. Upstream Pressure')
+plt.legend()
+plt.grid(True)
+plt.text(50, max(mass_flux) * 0.9, 'Subsonic', fontsize=12)
+plt.text(220, max(mass_flux) * 0.9, 'Sonic', fontsize=12)
+plt.show()
+
